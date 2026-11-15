@@ -22,3 +22,12 @@ The 2023-11-09 seal of the other projects applies here too (`research/seal.yaml`
 files dated on or after it are kept under `data/massive/sealed/`, unread.
 
 Secrets: Massive keys live only in `.env` (gitignored; template `.env.example`).
+
+## Exploratory search (not a trial)
+
+`scripts/explore.py` tabulates entry and exit variants on the stage-2 minute bars
+(`qts_rebound/explore/`, needs `numba`: `pip install -e ".[explore]"`): `build` writes one row per
+order and entry rule, `scan` the tables, `tick-sample` and `tick-check` the tick check of the
+opening fills (`scripts/massive.py ticks` fetches the ticks on the Mac). Results and their
+caveats: `docs/notes/2026-11-15_exploration_open_sweep.md`. Nothing there is evidence until a
+pre-registered run on the holdout.

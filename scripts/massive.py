@@ -9,6 +9,7 @@ Standard library only: any Python 3.9+ works, nothing to install. Keys come from
     python3 scripts/massive.py verify     # re-check downloaded files against Massive's checksums
     python3 scripts/massive.py tickers    # ticker reference lists, active and delisted
     python3 scripts/massive.py quotes     # quotes around the 500 sampled stage-2 fills (later)
+    python3 scripts/massive.py ticks      # trades and quotes around sampled opening fills (exploratory)
 
 Options for plan/get/verify: --datasets day_aggs,minute_aggs  --from 2003-09-10  --to 2026-11-13
 --workers 4  --time-budget SECONDS  --refresh (re-list instead of using today's listing).
@@ -42,7 +43,7 @@ from qts_rebound.massive.flatfiles import (  # noqa: E402
     save_listing,
     verify_local,
 )
-from qts_rebound.massive.quotes import fetch_sample  # noqa: E402
+from qts_rebound.massive.quotes import fetch_sample, fetch_ticks  # noqa: E402
 from qts_rebound.massive.rest import API, Rest, download_tickers  # noqa: E402
 from qts_rebound.massive.s3 import ENDPOINT, AuthError, S3Client, S3Error  # noqa: E402
 
@@ -283,6 +284,15 @@ def cmd_quotes(a) -> int:
     return 0
 
 
+def cmd_ticks(a) -> int:
+    sample = Path(a.sample) if a.sample else REPO_ROOT / "data" / "explore" / "tick_sample.csv"
+    if not sample.exists():
+        print(f"No sample yet ({sample}): it is written by scripts/explore.py tick-sample.")
+        return 1
+    fetch_ticks(rest_client(), sample, Path(a.root) / "quotes" / "tick_check.jsonl")
+    return 0
+
+
 def main(argv=None) -> int:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--root", default=os.environ.get("QTS_MASSIVE_ROOT", str(DEFAULT_ROOT)))
@@ -290,6 +300,8 @@ def main(argv=None) -> int:
     sub.add_parser("check")
     sub.add_parser("tickers")
     q = sub.add_parser("quotes")
+    q.add_argument("--sample", default=None)
+    q = sub.add_parser("ticks")
     q.add_argument("--sample", default=None)
     for name in ("plan", "get", "verify"):
         s = sub.add_parser(name)
@@ -308,6 +320,8 @@ def main(argv=None) -> int:
         "get": cmd_get,
         "verify": cmd_verify,
         "tickers": cmd_tickers,
+        "quotes": cmd_quotes,
+        "ticks": cmd_ticks,
     }
     try:
         return cmds[a.cmd](a)

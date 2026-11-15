@@ -80,3 +80,65 @@ def fetch_sample(rest: Rest, sample_csv: Path, out_jsonl: Path, printer=print) -
                 printer(f"  {i}/{len(rows)} fills")
     printer(f"  {n} windows fetched -> {out_jsonl}")
     return n
+
+
+# ------------------------------------------------------------------ ticks around open-window fills
+
+TICK_FIELDS = {
+    "trades": ("sip_timestamp", "price", "size", "exchange", "conditions", "trf_id"),
+    "quotes": (
+        "sip_timestamp",
+        "bid_price",
+        "bid_size",
+        "bid_exchange",
+        "ask_price",
+        "ask_size",
+        "ask_exchange",
+    ),
+}
+
+
+def tick_window(row: dict[str, str]) -> tuple[int, int]:
+    """From 09:28 (or two minutes before the fill bar, if later) to three minutes after it."""
+    entry = float(row["entry_minute"])
+    fill_bar = entry - 1 if entry > 570 else 570
+    return ns_at(row["date"], max(568, fill_bar - 2)), ns_at(row["date"], fill_bar + 4)
+
+
+def fetch_ticks(rest: Rest, sample_csv: Path, out_jsonl: Path, printer=print) -> int:
+    """Trades and NBBO quotes around each sampled fill (exploratory tick check): one JSON line
+    per fill with both lists; re-running skips the fills already fetched."""
+    done = set()
+    if out_jsonl.exists():
+        for line in out_jsonl.read_text(encoding="utf-8").splitlines():
+            r = json.loads(line)
+            done.add((r["date"], r["sym"]))
+    with open(sample_csv, encoding="utf-8") as fh:
+        rows = list(csv.DictReader(fh))
+    n = 0
+    out_jsonl.parent.mkdir(parents=True, exist_ok=True)
+    with open(out_jsonl, "a", encoding="utf-8") as f:
+        for i, row in enumerate(rows, 1):
+            if (row["date"], row["sym"]) in done:
+                continue
+            t0, t1 = tick_window(row)
+            rec = {"date": row["date"], "sym": row["sym"], "t0": t0, "t1": t1}
+            for kind, fields in TICK_FIELDS.items():
+                items = rest.paginate(
+                    f"/v3/{kind}/{row['sym']}",
+                    {
+                        "timestamp.gte": str(t0),
+                        "timestamp.lt": str(t1),
+                        "limit": LIMIT,
+                        "order": "asc",
+                        "sort": "timestamp",
+                    },
+                )
+                rec[kind] = [{k: x.get(k) for k in fields} for x in items]
+            f.write(json.dumps(rec) + "\n")
+            f.flush()
+            n += 1
+            if i % 25 == 0:
+                printer(f"  {i}/{len(rows)} fills")
+    printer(f"  {n} fills fetched -> {out_jsonl}")
+    return n

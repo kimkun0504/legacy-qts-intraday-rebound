@@ -66,8 +66,8 @@ then `get` again.
 - `data/massive/manifest/` (listings, download log) and `data/massive/reference/` (tickers).
 - `data/` is gitignored: nothing here is ever committed.
 
-**iCloud:** if *Desktop & Documents Folders* sync is on (System Settings > your name > iCloud
-> iCloud Drive), ~95 GB on the Desktop would upload to iCloud. In that case don't run `get` yet;
+**iCloud:** if *Desktop & Documents Folders* sync is on (System Settings, your name, iCloud,
+iCloud Drive), ~95 GB on the Desktop would upload to iCloud. In that case don't run `get` yet;
 tell me, and we'll pick a folder outside the Desktop (add `--root <folder>` and connect that
 folder to the session).
 

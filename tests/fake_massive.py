@@ -32,10 +32,12 @@ class FakeMassive:
         tickers: list[dict] | None = None,
         page_size: int = 2,
         quotes: dict[str, list[dict]] | None = None,
+        trades: dict[str, list[dict]] | None = None,
     ):
         self.objects = dict(objects)
         self.tickers = tickers or []
         self.quotes = quotes or {}
+        self.trades = trades or {}
         self.page_size = page_size
         self.faults: dict[str, list[str]] = {}  # key -> queue of faults: cut | 500 | corrupt | 403
         self.requests: list[str] = []
@@ -163,10 +165,11 @@ class FakeMassive:
                 q = dict(parse_qsl(u.query))
                 if q.get("apiKey") != API_KEY:
                     return self._send(401, json.dumps({"message": "bad key"}).encode(), "application/json")
-                if u.path.startswith("/v3/quotes/"):
+                if u.path.startswith(("/v3/quotes/", "/v3/trades/")):
                     sym = unquote(u.path.rsplit("/", 1)[1])
                     lo, hi = int(q["timestamp.gte"]), int(q["timestamp.lt"])
-                    rows = [r for r in fake.quotes.get(sym, []) if lo <= r["sip_timestamp"] < hi]
+                    src = fake.quotes if u.path.startswith("/v3/quotes/") else fake.trades
+                    rows = [r for r in src.get(sym, []) if lo <= r["sip_timestamp"] < hi]
                     return self._send(
                         200, json.dumps({"results": rows, "status": "OK"}).encode(), "application/json"
                     )

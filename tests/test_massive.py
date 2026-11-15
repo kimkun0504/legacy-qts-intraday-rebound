@@ -240,3 +240,39 @@ def test_quotes_for_sampled_fills(tmp_path):
     recs = {r["label"]: r for r in map(json.loads, out.read_text().splitlines())}
     assert [x["bid_price"] for x in recs["entry"]["quotes"]] == [9.9]
     assert [x["bid_price"] for x in recs["close"]["quotes"]] == [10.0]
+
+
+def test_ticks_for_opening_fills_and_cli_commands(tmp_path, monkeypatch, capsys):
+    from qts_rebound.massive.quotes import fetch_ticks, ns_at, tick_window
+
+    row = {"date": "2020-07-01", "sym": "AAA", "entry_minute": "571"}
+    assert tick_window(row) == (ns_at("2020-07-01", 568), ns_at("2020-07-01", 574))
+    t = ns_at("2020-07-01", 570) + 7
+    trades = {
+        "AAA": [
+            {"sip_timestamp": t, "price": 9.4, "size": 100, "exchange": 11, "conditions": [12]},
+            {"sip_timestamp": ns_at("2020-07-01", 700), "price": 9.9, "size": 1, "exchange": 4},
+        ]
+    }
+    quotes = {
+        "AAA": [{"sip_timestamp": t - 5, "bid_price": 9.3, "bid_size": 1, "ask_price": 10.0, "ask_size": 2}]
+    }
+    sample = tmp_path / "s.csv"
+    sample.write_text("date,sym,entry_minute\n2020-07-01,AAA,571\n")
+    out = tmp_path / "t.jsonl"
+    with FakeMassive({}, quotes=quotes, trades=trades) as fm:
+        rest = Rest(API_KEY, base=fm.url)
+        assert fetch_ticks(rest, sample, out, printer=lambda s: None) == 1
+        assert fetch_ticks(rest, sample, out, printer=lambda s: None) == 0  # resumable
+    rec = json.loads(out.read_text().splitlines()[0])
+    assert [x["price"] for x in rec["trades"]] == [9.4] and rec["trades"][0]["conditions"] == [12]
+    assert [x["bid_price"] for x in rec["quotes"]] == [9.3]
+
+    # the CLI knows both commands (a missing sample is a clean message, not a crash)
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
+    import massive as cli
+
+    monkeypatch.setenv("MASSIVE_API_KEY", API_KEY)
+    for cmd in ("quotes", "ticks"):
+        assert cli.main(["--root", str(tmp_path), cmd, "--sample", str(tmp_path / "missing.csv")]) == 1
+    assert "No sample yet" in capsys.readouterr().out
