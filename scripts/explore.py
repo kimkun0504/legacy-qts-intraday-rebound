@@ -35,8 +35,10 @@ PANEL = OUT / "panel"
 FEATS = ["relvol", "gap_sig", "depth_sig", "bars_before", "first_bar_rel", "trig_rel", "mfe", "mae"]
 
 
-def build_month(month: str, o: pd.DataFrame, position: float = engine.POSITION, entries=None) -> pd.DataFrame:
-    bars = pd.read_parquet(s2.MINUTES / f"{month}.parquet")
+def build_month(
+    month: str, o: pd.DataFrame, position: float = engine.POSITION, entries=None, minutes: Path | None = None
+) -> pd.DataFrame:
+    bars = pd.read_parquet((minutes or s2.MINUTES) / f"{month}.parquet")
     bars["date"] = pd.to_datetime(bars["date"])
     sess = sessions(bars[bars["sym"] == "IWM"])
     o = o.merge(sess, on="date", how="left")

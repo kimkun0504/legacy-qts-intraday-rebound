@@ -80,6 +80,51 @@ on **no** volume. No pre-market trading, a thin first minute and little volume b
 raise the return; entries after a volume spike do not. These are sell orders hitting an empty book
 at the open, and the price is back within minutes (median best price after the fill: +7 %).
 
+## Out-of-universe check: small caps
+
+The rule was shaped on micro caps only. The same rule, unchanged, in the small-cap universe
+(`scripts/explore_universe.py small`; 290k stock-days reached the limit, 99 % matched):
+
+| | 2003-2016 | 2017-2023 | 2020-2023 |
+|---|---|---|---|
+| Trades | 12,804 | 7,393 | 5,095 |
+| Net | +2.40 % (t 6.3) | -0.02 % (t 0.0) | -1.14 % |
+| Median net | +2.70 % | +0.99 % | -0.46 % |
+
+By year it is positive in 20 of 21 years (+1.3 % to +4.3 % in most), and **-3.2 % in 2020**: on the
+crash days of March 2020 liquid names opened 5 % down and kept falling, and those days carry many
+fills. By liquidity (2017-2023): ADV $1-3M +1.5 %, $3-10M +0.2 %, above $10M -1.1 %.
+
+Reading: the direction carries over to stocks that were never looked at, at about half the size,
+and it shrinks with liquidity, which fits a payment for supplying liquidity at the open. It also
+shows the tail: when the whole market gaps down, every resting order fills and loses together.
+The micro-cap rule had the same year as its worst (+0.5 %). A market-wide stop (no orders when the
+index futures are down hard before the open) is the obvious guard; it has not been tested, to avoid
+shaping the rule further.
+
+## What it earns on capital: the order budget
+
+3-4 % a trade is not the return on the account. Only 0.3 % of resting orders fill, so the scarce
+thing is how many orders can rest. A model of fill probability (sigma, ADV, price, past sweeps in
+the name; fitted on 2003-2012, applied to 2013-2023) picks which names get an order:
+
+| Orders resting each day | Fills a year | Net a trade | Profit a year at $500 an order |
+|---|---|---|---|
+| 20 | 35 | +3.7 % | $640 |
+| 50 | 74 | +3.5 % | $1,300 |
+| 100 | 132 | +3.6 % | $2,400 |
+| 200 | 229 | +3.6 % | $4,100 |
+| 400 | 346 | +3.5 % | $6,000 |
+| all (676) | 400 | +3.6 % | $7,100 |
+
+Ranking helps a little (the top 20 fill at 0.7 % against 0.3 %), and the return per fill does not
+depend on the rank. So profit is roughly `0.5 % x 3.6 % x 252 = 4.5 % a year` of the money tied up
+in resting orders. If every open order must be fully funded (a cash account), $10,000 earns about
+$500 a year from this rule. If the broker checks buying power only at the fill, or allows 4x
+intraday margin, the same $10,000 can carry $40,000-$300,000 of orders and earn $2,000-$6,000.
+That is the first thing to find out in the paper account. (The $25,000 pattern-day-trader minimum
+no longer applies: FINRA replaced it with intraday margin rules from 2026-06-04.)
+
 ## Why this may not be real money (in order of weight)
 
 1. **The orders have to be resting.** Reacting after the print does not work: a limit placed after
