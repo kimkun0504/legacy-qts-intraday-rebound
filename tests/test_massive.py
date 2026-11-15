@@ -210,3 +210,33 @@ def test_cli_end_to_end(tmp_path, monkeypatch, capsys):
         assert json.loads(next(lines).read_text().splitlines()[0])["ticker"] == "LEH"
         with gzip.open(next((tmp_path / "massive" / "raw").rglob("2003-09-10.csv.gz")), "rt") as f:
             assert f.readline().startswith("ticker,volume")
+
+
+def test_quotes_for_sampled_fills(tmp_path):
+    from qts_rebound.massive.quotes import fetch_sample, ns_at
+
+    t_fill = ns_at("2020-07-01", 600) + 5_000_000_000  # 10:00:05
+    t_close = ns_at("2020-07-01", 955) + 1  # 15:55
+    q = {
+        "AAA": [
+            {"sip_timestamp": t_fill, "bid_price": 9.9, "bid_size": 100, "ask_price": 10.1, "ask_size": 200},
+            {"sip_timestamp": t_close, "bid_price": 10.0, "bid_size": 1, "ask_price": 10.2, "ask_size": 1},
+            {
+                "sip_timestamp": ns_at("2020-07-01", 700),
+                "bid_price": 1,
+                "bid_size": 1,
+                "ask_price": 2,
+                "ask_size": 1,
+            },
+        ]
+    }
+    sample = tmp_path / "s.csv"
+    sample.write_text("date,sym,entry_minute,close\n2020-07-01,AAA,601,960\n")
+    out = tmp_path / "q.jsonl"
+    with FakeMassive({}, quotes=q) as fm:
+        rest = Rest(API_KEY, base=fm.url)
+        assert fetch_sample(rest, sample, out, printer=lambda s: None) == 2
+        assert fetch_sample(rest, sample, out, printer=lambda s: None) == 0  # resumable
+    recs = {r["label"]: r for r in map(json.loads, out.read_text().splitlines())}
+    assert [x["bid_price"] for x in recs["entry"]["quotes"]] == [9.9]
+    assert [x["bid_price"] for x in recs["close"]["quotes"]] == [10.0]

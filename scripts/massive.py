@@ -8,6 +8,7 @@ Standard library only: any Python 3.9+ works, nothing to install. Keys come from
     python3 scripts/massive.py get        # download everything (resumable: re-run to continue)
     python3 scripts/massive.py verify     # re-check downloaded files against Massive's checksums
     python3 scripts/massive.py tickers    # ticker reference lists, active and delisted
+    python3 scripts/massive.py quotes     # quotes around the 500 sampled stage-2 fills (later)
 
 Options for plan/get/verify: --datasets day_aggs,minute_aggs  --from 2003-09-10  --to 2026-11-13
 --workers 4  --time-budget SECONDS  --refresh (re-list instead of using today's listing).
@@ -41,6 +42,7 @@ from qts_rebound.massive.flatfiles import (  # noqa: E402
     save_listing,
     verify_local,
 )
+from qts_rebound.massive.quotes import fetch_sample  # noqa: E402
 from qts_rebound.massive.rest import API, Rest, download_tickers  # noqa: E402
 from qts_rebound.massive.s3 import ENDPOINT, AuthError, S3Client, S3Error  # noqa: E402
 
@@ -272,12 +274,23 @@ def cmd_tickers(a) -> int:
     return 0
 
 
+def cmd_quotes(a) -> int:
+    sample = Path(a.sample) if a.sample else REPO_ROOT / "data" / "stage2" / "quote_sample.csv"
+    if not sample.exists():
+        print(f"No sample yet ({sample}): it is written by the stage-2 run (run_stage2.py quote-sample).")
+        return 1
+    fetch_sample(rest_client(), sample, Path(a.root) / "quotes" / "quote_check.jsonl")
+    return 0
+
+
 def main(argv=None) -> int:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--root", default=os.environ.get("QTS_MASSIVE_ROOT", str(DEFAULT_ROOT)))
     sub = p.add_subparsers(dest="cmd", required=True)
     sub.add_parser("check")
     sub.add_parser("tickers")
+    q = sub.add_parser("quotes")
+    q.add_argument("--sample", default=None)
     for name in ("plan", "get", "verify"):
         s = sub.add_parser(name)
         s.add_argument("--datasets", default="day_aggs,minute_aggs")
