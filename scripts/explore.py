@@ -278,16 +278,156 @@ def cmd_tick_check(a) -> None:
     print(json.dumps(out, indent=1))
 
 
+MONITOR = OUT / "open_sweep"
+SCORE_FIT_END = 2012  # the fill-probability model is fitted on years up to here
+
+
+def universe_orders() -> pd.DataFrame:
+    """Every order the rule would rest: micro-cap members with 40 days of returns, by day."""
+    import duckdb
+
+    con = duckdb.connect(str(s2.PANEL_DB), read_only=True)
+    q = f"""
+    with fri as (select date fdate, d fd from cal where friday),
+    days as (select date, d from cal where date between date '{s2.WINDOW_START}' and date '{s2.last_research_day()}'),
+    dmap as (select days.date, days.d, f.fdate from days asof join fri f on f.fd <= days.d - 1),
+    mem as (select dm.date, dm.d, u.ticker from dmap dm join uni_micro u on u.date = dm.fdate),
+    sig as (select ticker, d,
+       stddev_samp(r) over (partition by ticker order by d rows between 60 preceding and 1 preceding) sigma,
+       count(r) over (partition by ticker order by d rows between 60 preceding and 1 preceding) n_sig,
+       lag(adv) over (partition by ticker order by d) adv_prev,
+       lag(craw) over (partition by ticker order by d) prev_close
+       from (select ticker, d, adv, craw, c / lag(c) over (partition by ticker order by d) - 1 r from px2))
+    select m.date, m.ticker, g.sigma, g.adv_prev, g.prev_close
+    from mem m join sig g on g.ticker = m.ticker and g.d = m.d and g.n_sig >= 40"""
+    u = con.execute(q).df()
+    con.close()
+    u["date"] = pd.to_datetime(u["date"])
+    return u
+
+
+def cmd_export(a) -> None:
+    """Files for the Workbench's rebound monitor: the rule's trades, its daily P&L and the daily
+    order sheet (every order the rule would rest, with a fill-probability score)."""
+    import lightgbm as lgb
+
+    en, xn = stats.names()
+    ename, w, pm, xname = HEADLINE["open_sweep_5"]
+    t = stats.load(PANEL)
+    t = t[(t["e"] == en.index(ename)) & (t["emin"] <= w) & (t["pre_dv"] < pm * t["adv_prev"])].copy()
+    t["gross"] = t[f"r{xn.index(xname)}"].astype(float)
+    t["cost"] = t["cost"].astype(float)
+    t["net"] = t["gross"] - t["cost"]
+    t["drop"] = t["px"] / t["cprev_u"] - 1
+    t = t.rename(columns={"emin": "entry_minute", "px": "fill_px", "cprev_u": "prev_close", "cu": "close_px"})
+    cols = [
+        "date",
+        "ticker",
+        "sym",
+        "news",
+        "prev_close",
+        "sigma",
+        "adv_prev",
+        "fill_px",
+        "drop",
+        "shares",
+        "q_auction",
+        "entry_minute",
+        "close_px",
+        "gross",
+        "cost",
+        "net",
+        "mfe",
+        "mae",
+    ]
+    MONITOR.mkdir(parents=True, exist_ok=True)
+    t[cols].sort_values(["date", "ticker"]).to_parquet(MONITOR / "trades.parquet", index=False)
+
+    tn = t[~t["news"]]
+    days = s2.trading_days()
+    d = tn.groupby("date").agg(
+        fills=("net", "size"), pnl=("net", "sum"), wins=("net", lambda x: int((x > 0).sum()))
+    )
+    d = d.reindex(days, fill_value=0).rename_axis("date").reset_index()
+    d["equity"] = d["pnl"].cumsum()
+    d.to_parquet(MONITOR / "daily.parquet", index=False)
+
+    u = universe_orders().merge(tn[["date", "ticker", "net"]], on=["date", "ticker"], how="left")
+    u["filled"] = u["net"].notna()
+    u = u.sort_values(["ticker", "date"]).reset_index(drop=True)
+    g = u.groupby("ticker")["filled"]
+    u["sweeps_250d"] = g.transform(lambda x: x.shift(1).rolling(250, min_periods=1).sum()).fillna(0)
+    u["sweeps_60d"] = g.transform(lambda x: x.shift(1).rolling(60, min_periods=1).sum()).fillna(0)
+    u["limit"] = u["prev_close"] * (1 - np.maximum(2 * u["sigma"], 0.05))
+    feats = pd.DataFrame(
+        {
+            "sigma": u["sigma"],
+            "ladv": np.log(u["adv_prev"].clip(lower=1e3)),
+            "lp": np.log(u["prev_close"].clip(lower=0.1)),
+            "s250": u["sweeps_250d"],
+            "s60": u["sweeps_60d"],
+        }
+    )
+    fit = u["date"].dt.year <= SCORE_FIT_END
+    m = lgb.LGBMClassifier(
+        n_estimators=200, learning_rate=0.05, num_leaves=31, min_child_samples=500, verbose=-1
+    )
+    m.fit(feats[fit], u.loc[fit, "filled"])
+    u["score"] = m.predict_proba(feats)[:, 1]
+    u["rank"] = u.groupby("date")["score"].rank(ascending=False, method="first").astype(int)
+    u["month"] = u["date"].dt.strftime("%Y-%m")
+    keep = [
+        "date",
+        "ticker",
+        "prev_close",
+        "sigma",
+        "adv_prev",
+        "limit",
+        "sweeps_250d",
+        "score",
+        "rank",
+        "filled",
+        "net",
+    ]
+    (MONITOR / "orders").mkdir(exist_ok=True)
+    for month, um in u.groupby("month"):
+        um[keep].sort_values(["date", "rank"]).to_parquet(
+            MONITOR / "orders" / f"{month}.parquet", index=False
+        )
+    meta = {
+        "rule": "open_sweep_5",
+        "entry": ename,
+        "cancel_minute": w,
+        "pre_market_cap": pm,
+        "exit": xname,
+        "position_usd": engine.POSITION,
+        "score_fitted_through": SCORE_FIT_END,
+        "first_day": str(days[0].date()),
+        "last_day": str(days[-1].date()),
+        "trades": len(tn),
+        "orders": len(u),
+        "status": "exploratory",
+    }
+    import json
+
+    (MONITOR / "meta.json").write_text(json.dumps(meta, indent=1))
+    print(meta)
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("cmd", choices=["build", "scan", "tick-sample", "tick-check"])
+    ap.add_argument("cmd", choices=["build", "scan", "tick-sample", "tick-check", "export"])
     ap.add_argument("--budget", type=float, default=0)
     ap.add_argument("--force", action="store_true")
     ap.add_argument("--position", type=float, default=engine.POSITION)
     a = ap.parse_args()
-    {"build": cmd_build, "scan": cmd_scan, "tick-sample": cmd_tick_sample, "tick-check": cmd_tick_check}[
-        a.cmd
-    ](a)
+    {
+        "build": cmd_build,
+        "scan": cmd_scan,
+        "tick-sample": cmd_tick_sample,
+        "tick-check": cmd_tick_check,
+        "export": cmd_export,
+    }[a.cmd](a)
 
 
 if __name__ == "__main__":
