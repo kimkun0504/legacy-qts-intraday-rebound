@@ -30,8 +30,27 @@ Research window 2003-09-10 to 2023-11-08; the holdout (from 2023-11-09) stayed s
 - Opening-auction fills (7 % of trades) earn +2.5 % net; fills during the day earn +0.59 %.
   The exploratory note `2026-11-15_exploration_open_sweep.md` follows that lead.
 
+## Pre-registered sensitivity (reported only; run 2026-11-15)
+
+Net per trade and NW t, `data/stage2/results_sensitivity.json`:
+
+| Fill variant | P1 | P2 | P3 |
+|---|---|---|---|
+| base (0.5 % trade-through, 2x volume, auction cap 25 %) | +0.74 % (16.1) | +0.15 % (1.4) | +0.79 % (17.0) |
+| no trade-through needed | +0.97 % (24.5) | +0.54 % (5.7) | +1.01 % (25.3) |
+| 1 % trade-through | +0.48 % (8.9) | -0.24 % (-2.1) | +0.54 % (10.0) |
+| 2 % trade-through | **+0.00 % (0.0)** | -0.98 % (-6.7) | +0.08 % (1.1) |
+| auction cap 10 % / 50 % | +0.73 % / +0.74 % | +0.15 % | +0.77 % / +0.79 % |
+| no volume rule | +0.77 % (16.7) | +0.15 % (1.5) | +0.81 % (17.6) |
+| auction part priced at the limit | +0.43 % (9.2) | -0.39 % (-3.6) | +0.62 % (13.6) |
+| cut-off 15:30 | +0.79 % (16.4) | +0.18 % (1.6) | +0.84 % (17.4) |
+
+The pass is fragile to queue position: if the price has to trade 2 % through the limit before the
+order counts as filled, P1 earns nothing. The all-day rule lives on fills at shallow touches, where
+a real order may sit behind others. (The opening-window rule in the exploratory note keeps +3.1 %
+under a 5 % trade-through.)
+
 ## Not yet done
 
-The pre-registered sensitivity variants (`run_stage2.py fills --variants ...`), the diagnostics
-module, and the quote check (`run_stage2.py quote-sample` is written; the owner runs
+The diagnostics module and the quote check (`run_stage2.py quote-sample` is written; the owner runs
 `scripts/massive.py quotes` on the Mac). They are reported only and select nothing.
