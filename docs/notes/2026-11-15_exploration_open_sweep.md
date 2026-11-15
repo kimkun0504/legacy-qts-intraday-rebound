@@ -95,6 +95,10 @@ By year it is positive in 20 of 21 years (+1.3 % to +4.3 % in most), and **-3.2 
 crash days of March 2020 liquid names opened 5 % down and kept falling, and those days carry many
 fills. By liquidity (2017-2023): ADV $1-3M +1.5 %, $3-10M +0.2 %, above $10M -1.1 %.
 
+**Large caps**, same rule (`scripts/explore_universe.py large`): +1.9 % in 2003-2016 (t 2.8),
+-1.4 % in 2017-2023; by year mostly between -0.4 % and +2.4 %, -2.3 % in 2020. Little is left
+where the book is deep.
+
 Reading: the direction carries over to stocks that were never looked at, at about half the size,
 and it shrinks with liquidity, which fits a payment for supplying liquidity at the open. It also
 shows the tail: when the whole market gaps down, every resting order fills and loses together.
