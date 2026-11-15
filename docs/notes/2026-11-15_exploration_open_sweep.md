@@ -9,7 +9,8 @@ variants were tabulated (`data/explore/scan.parquet`); the look is logged in the
 **Bottom line.** One rule reaches +3 to +4 % a trade in the bar-level backtest. An independent
 review of the code then showed that about half of that comes from two generous assumptions
 (price improvement at the open, and selling at the last print). With both removed the rule earns
-about **+2 %** a trade; under the harshest reading it earns nothing. It needs resting orders in
+about **+2 %** a trade (about +3.5 % for sweeps of 8 % or more filled after the open); under the
+harshest reading it earns little or nothing. It needs resting orders in
 hundreds of names, so the return on capital depends on the broker, not on the return per trade.
 
 Code: `qts_rebound/explore/` and `scripts/explore.py` (`build`, `scan`, `tick-sample`,
@@ -64,6 +65,23 @@ Other variants as modelled (2003-2016 / 2017-2023): floor 8 % +5.52 / +4.29 %; p
 +4.09 / +3.19 %; only ADV of $1M or more +2.66 / +2.53 %. Sensitivity is smooth (2017-2023):
 cancel at 09:31 +3.7 %, 09:35 +3.4 %, 09:40 +3.2 %, 10:00 +2.6 %, never +0.7 %; pre-market cap
 0.1 % of ADV +3.7 %, 1 % +3.4 %, 5 % +3.1 %, none +2.1 %.
+
+## The variant that reaches 3-4 % under the conservative reading
+
+Deeper sweeps earn more, and fills at the open are the weak part. Both together, still with
+every share priced at the limit and sold at the low of the bar 60 minutes after the fill:
+
+| Conservative net per trade | 2003-2016 | 2017-2023 | 2020-2023 |
+|---|---|---|---|
+| Floor 8 % (4,294 / 1,512 / 956 trades) | +2.96 % (t 15.2) | +3.27 % (t 11.5) | +2.82 % (t 7.3) |
+| Floor 8 %, only fills after the open (2,665 / 1,092 / 656) | **+3.57 %** (t 15.5) | **+3.93 %** (t 13.7) | **+3.50 %** (t 9.0) |
+| The same in names with ADV of $300k or more (1,358 / 691 / 433) | +3.28 % | +3.66 % | +3.13 % |
+| Floor 8 %, harshest exit, all fills | +2.15 % | +1.84 % (t 2.8) | +1.05 % (t 1.0) |
+
+"Only fills after the open" means the order takes no part in the opening auction: in practice it
+is sent just after 09:30, and days when the stock opens below the limit are skipped. That is
+about 155 trades a year (median +4.9 %, 80 % wins in 2017-2023). It is one more choice made after
+looking, so it carries the same caveats as everything here, and the harshest exit still halves it.
 
 ## What the review changed (2026-11-15)
 

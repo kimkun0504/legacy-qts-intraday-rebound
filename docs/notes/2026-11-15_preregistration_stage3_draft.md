@@ -14,7 +14,7 @@ Massive minute and daily flat files, 2023-11-09 to the last complete day at regi
 daily data for the universe, sigma, ADV and the news flag, as in stages 1 and 2. Same name
 matching and the same two data gates as stage 2, computed on the holdout before any return.
 
-## Trials (Holm over 2)
+## Trials (Holm over 3)
 Both: micro caps without news; pre-market dollar volume (04:00-09:24) under 1 % of the 63-day ADV;
 buy limit at prior close x (1 - max(2 sigma, 5 %)) placed before the open; a real cancel at 09:35;
 $500 a position; stage-2 fill rule (0.5 % trade-through, 2x volume; auction part capped at 25 % of
@@ -24,6 +24,7 @@ the first minute) with **every share priced at the limit**.
 |---|---|
 | O1 | the low of the first bar 60 minutes or more after the fill (the official close if none) |
 | O2 | the official close (MOC) |
+| O3 | as O1, with a floor of 8 % instead of 5 % and no auction part: the order is live from 09:30 and days that open below the limit are skipped |
 
 The conservative reading (O1) is the main trial: the review of the exploration showed that price
 improvement at the open and the closing print flattered the first numbers.
