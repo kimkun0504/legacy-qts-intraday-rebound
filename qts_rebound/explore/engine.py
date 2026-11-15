@@ -38,6 +38,14 @@ ENTRIES: list[tuple] = (
     + [("vol", 2, 0, x) for x in (0.05, 0.08)]
     # stricter fills for the resting limit: trade-through p (instead of 0.5 %) and 5x the volume
     + [("lim", 2, p, 0.05) for p in (0.02, 0.05)]
+    # a real cancel minute as the fifth field: nothing fills at or after it. With a strict
+    # trade-through (third field) these also take no auction part.
+    + [
+        ("lim", 2, 0, 0.05, 575),
+        ("lim", 2, 0, 0.08, 575),
+        ("lim", 2, 0.02, 0.05, 575),
+        ("lim", 2, 0.05, 0.05, 575),
+    ]
 )
 EXITS: list[tuple[str, float, float]] = (
     [("moc", 0, 0)]
@@ -45,15 +53,18 @@ EXITS: list[tuple[str, float, float]] = (
     + [("stop", 0, y) for y in (0.03, 0.05, 0.10)]
     + [("time", n, 0) for n in (15, 60, 120)]
     + [("tgtstop", x, y) for x, y in ((0.05, 0.05), (0.08, 0.05), (0.03, 0.03), (0.12, 0.10))]
+    # executable-price checks: the lowest low of the last N bars; the low of the bar N minutes on
+    + [("lowlast", 10, 0), ("timelow", 60, 0)]
 )
 ETYPE = {"lim": 0, "auc": 1, "vol": 2, "rev": 3, "time": 4, "rlim": 5}
-XTYPE = {"moc": 0, "tgt": 1, "stop": 2, "time": 3, "tgtstop": 4}
+XTYPE = {"moc": 0, "tgt": 1, "stop": 2, "time": 3, "tgtstop": 4, "lowlast": 5, "timelow": 6}
 
 
 def entry_name(e: tuple) -> str:
     t, k, p = e[:3]
     base = f"{t}{k:g}" if t in ("auc", "rlim") or (t == "lim" and not p) else f"{t}{k:g}_{p:g}"
-    return base + (f"_abs{e[3] * 100:g}" if len(e) > 3 else "")
+    base += f"_abs{e[3] * 100:g}" if len(e) > 3 else ""
+    return base + (f"_c{e[4]:g}" if len(e) > 4 else "")
 
 
 def exit_name(x: tuple[str, float, float]) -> str:
@@ -66,10 +77,12 @@ def exit_name(x: tuple[str, float, float]) -> str:
         return f"stop{b * 100:g}"
     if t == "time":
         return f"t{a:g}"
+    if t in ("lowlast", "timelow"):
+        return f"{t}{a:g}"
     return f"tgt{a * 100:g}_stop{b * 100:g}"
 
 
-N_FEAT = 8  # relvol, gap_sig, depth_sig, bars_before, first_bar_rel, trig_rel, mfe, mae
+N_FEAT = 9  # relvol, gap_sig, depth_sig, bars_before, first_bar_rel, trig_rel, mfe, mae
 
 
 @njit(cache=True)
@@ -92,6 +105,7 @@ def kernel(
     ek,
     ep,
     eabs,
+    ecancel,
     xtype,
     xa,
     xb,
@@ -135,7 +149,8 @@ def kernel(
             trig = -1
             t = etype[e]
             if t == 0 or t == 1:
-                if minute[a] == OPEN and o[a] <= L:
+                strict_cancel = ecancel[e] < 1e8 and ep[e] > 0
+                if minute[a] == OPEN and o[a] <= L and not strict_cancel:
                     qa = min(q, np.floor(0.25 * v[a]))
                 need = q - qa if t == 0 else 0.0
                 thr = ep[e] if ep[e] > 0 else 0.005
@@ -145,7 +160,7 @@ def kernel(
                     seen = False
                     cum = 0.0
                     for j in range(a, nb):
-                        if minute[j] >= cutoff[i]:
+                        if minute[j] >= cutoff[i] or minute[j] >= ecancel[e]:
                             break
                         if l[j] <= L:
                             cum += v[j]
@@ -292,10 +307,21 @@ def kernel(
                     if xt == 3 and minute[j] >= emin + xa[x] and j > start:
                         out_ret[r, x] = o[j] / px - 1.0
                         done += 1
+                    if xt == 6 and minute[j] >= emin + xa[x] and j > start:
+                        out_ret[r, x] = l[j] / px - 1.0
+                        done += 1
             moc = cu[i] / px - 1.0
             for x in range(n_x):
-                if np.isnan(out_ret[r, x]):
+                if xtype[x] == 5:  # the lowest low of the last N bars held (the close if none)
+                    lowest = cu[i]
+                    j0x = max(start, nb - int(xa[x]))
+                    for j in range(j0x, nb):
+                        if l[j] < lowest:
+                            lowest = l[j]
+                    out_ret[r, x] = lowest / px - 1.0
+                elif np.isnan(out_ret[r, x]):
                     out_ret[r, x] = moc
+            out_feat[r, 8] = minute[nb - 1]
             out_feat[r, 6] = mfe
             out_feat[r, 7] = mae
             out_oid[r] = i
@@ -316,6 +342,7 @@ def run(off, bars, orders, entries=ENTRIES, exits=EXITS, position=POSITION):
     ek = np.array([e[1] for e in entries], dtype=np.float64)
     ep = np.array([e[2] for e in entries], dtype=np.float64)
     eabs = np.array([e[3] if len(e) > 3 else 0.0 for e in entries], dtype=np.float64)
+    ecancel = np.array([e[4] if len(e) > 4 else 1e9 for e in entries], dtype=np.float64)
     xt = np.array([XTYPE[x[0]] for x in exits], dtype=np.int64)
     xa = np.array([x[1] for x in exits], dtype=np.float64)
     xb = np.array([x[2] for x in exits], dtype=np.float64)
@@ -349,6 +376,7 @@ def run(off, bars, orders, entries=ENTRIES, exits=EXITS, position=POSITION):
         ek,
         ep,
         eabs,
+        ecancel,
         xt,
         xa,
         xb,

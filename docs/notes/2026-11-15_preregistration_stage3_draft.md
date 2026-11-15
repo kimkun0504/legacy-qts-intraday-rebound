@@ -5,8 +5,8 @@ committed unchanged, and its hash is recorded in the ledger. The holdout (2023-1
 only with the owner's explicit go-ahead, once.
 
 ## Why
-The exploratory note `2026-11-15_exploration_open_sweep.md` found a rule that earned about +3 % net
-a trade in every period of the research window. It was chosen after looking, so the research
+The exploratory note `2026-11-15_exploration_open_sweep.md` found a rule that earned +2 % (conservative)
+to +3.4 % (as modelled) net a trade in the research window. It was chosen after looking, so the research
 window cannot test it. The holdout can.
 
 ## Data
@@ -14,23 +14,29 @@ Massive minute and daily flat files, 2023-11-09 to the last complete day at regi
 daily data for the universe, sigma, ADV and the news flag, as in stages 1 and 2. Same name
 matching and the same two data gates as stage 2, computed on the holdout before any return.
 
-## Trials (Holm over 3)
-All: micro caps without news; pre-market dollar volume (04:00-09:24) under 1 % of the 63-day ADV;
-buy limit placed before the open; unfilled orders cancelled at 09:35; exit MOC; $500 a position.
+## Trials (Holm over 2)
+Both: micro caps without news; pre-market dollar volume (04:00-09:24) under 1 % of the 63-day ADV;
+buy limit at prior close x (1 - max(2 sigma, 5 %)) placed before the open; a real cancel at 09:35;
+$500 a position; stage-2 fill rule (0.5 % trade-through, 2x volume; auction part capped at 25 % of
+the first minute) with **every share priced at the limit**.
 
-| Trial | Limit | Fill model |
-|---|---|---|
-| O1 | prior close x (1 - max(2 sigma, 5 %)) | stage 2: auction part capped at 25 % of the first minute; else 0.5 % trade-through and 2x volume |
-| O2 | as O1 | strict: no auction part; 5 % trade-through and 5x volume |
-| O3 | prior close x (1 - max(2 sigma, 8 %)) | as O1 |
+| Trial | Exit |
+|---|---|
+| O1 | the low of the first bar 60 minutes or more after the fill (the official close if none) |
+| O2 | the official close (MOC) |
+
+The conservative reading (O1) is the main trial: the review of the exploration showed that price
+improvement at the open and the closing print flattered the first numbers.
 
 ## Statistics and pass rules
 Trade-weighted net return (stage-2 cost model); NW(5) t on the daily P&L sum. A trial passes with
-all of: t at least 3 with Holm p under 0.05; net at least +1.5 % a trade (half of what the research
-window showed); at least 4 of 6 folds positive; net still positive with 1 % extra round-trip cost.
+all of: t at least 3 with Holm p under 0.05; net at least +1.0 % a trade (about half of what the
+research window showed for O1); at least 4 of 6 folds positive; net still positive with 1 % extra
+round-trip cost.
 
 ## Reported, not used for selection
-By year and month, ADV and price buckets, auction and continuous fills, the 60-minute exit, the
+By year and month, ADV and price buckets, auction and continuous fills, fills at the open price,
+the 2 % and 5 % trade-through variants, the harshest exit, the
 number of resting orders the rule needs, and the tick check on a random sample of holdout fills.
 
 ## What follows

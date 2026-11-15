@@ -37,18 +37,19 @@ from qts_rebound.stage2.mapping import alias_table, match  # noqa: E402
 
 FLOOR = 0.05
 ENTRIES = [
-    ("lim", 2, 0, 0.05),
-    ("lim", 2, 0, 0.08),
-    ("lim", 2, 0.05, 0.05),
+    ("lim", 2, 0, 0.05, 575),
+    ("lim", 2, 0, 0.08, 575),
+    ("lim", 2, 0.05, 0.05, 575),
     ("vol", 2, 0, 0.05),
-    ("rlim", 2, 0, 0.05),
+    ("lim", 2, 0, 0.05),
 ]
-RULES = {  # name: (entry, cancel minute, pre-market cap, exit)
-    "open_sweep_5": ("lim2_abs5", 575, 0.01, "moc"),
-    "open_sweep_8": ("lim2_abs8", 575, 0.01, "moc"),
-    "open_sweep_5_strict": ("lim2_0.05_abs5", 575, 0.01, "moc"),
+RULES = {  # name: (entry, cancel filter minute, pre-market cap, exit)
+    "open_sweep_5": ("lim2_abs5_c575", 960, 0.01, "moc"),
+    "open_sweep_5_low_exit": ("lim2_abs5_c575", 960, 0.01, "timelow60"),
+    "open_sweep_8": ("lim2_abs8_c575", 960, 0.01, "moc"),
+    "open_sweep_5_strict5": ("lim2_0.05_abs5_c575", 960, 0.01, "moc"),
     "open_sweep_5_reactive": ("vol2_0_abs5", 576, 0.01, "moc"),
-    "open_sweep_5_any_premarket": ("lim2_abs5", 575, 1e9, "moc"),
+    "open_sweep_5_any_premarket": ("lim2_abs5_c575", 960, 1e9, "moc"),
     "limit_5_all_day": ("lim2_abs5", 960, 1e9, "moc"),
 }
 

@@ -82,3 +82,24 @@ def test_tick_check_of_one_fill():
     assert c["bid_above_limit_before"] and c["spread_before"] == pytest.approx(10 / 9.5 - 1)
     assert c["ask_10s_vs_limit"] == pytest.approx(9.87 / 9.4 - 1) and "ask_1s_vs_limit" not in c
     assert ticks.check_fill({**rec, "trades": []}, 9.4, 53)["prints_at_limit"] == 0
+
+
+def test_cancel_time_strict_fill_and_low_exits():
+    bars = [  # opens below the limit (9.40), is completed only at 11:00, last bars sag
+        (570, 9.39, 9.45, 9.38, 9.45, 40),  # auction part: 25 % of 40 = 10 shares at 9.39
+        (660, 9.40, 9.41, 9.30, 9.35, 500),
+        (700, 9.50, 9.55, 9.20, 9.50, 300),
+        (955, 9.60, 9.70, 9.55, 9.70, 300),
+    ]
+    exits = [("moc", 0, 0), ("lowlast", 10, 0), ("timelow", 60, 0)]
+    r = _run(bars, [("lim", 2, 0, 0.05), ("lim", 2, 0, 0.05, 575), ("lim", 2, 0.05, 0.05, 575)], exits)
+    # no cancel: 10 auction shares plus 43 at 11:00; cancel 09:35: only the 10 auction shares;
+    # strict with a cancel: no auction part and nothing 5 % through before 09:35, so no trade
+    assert list(r["e"]) == [0, 1]
+    assert list(r["sh"]) == [53, 10] and list(r["minute"]) == [661, 570]
+    assert r["px"][1] == pytest.approx(9.39)
+    moc, lowlast, timelow = r["ret"][1]
+    assert moc == pytest.approx(10 / 9.39 - 1)
+    assert lowlast == pytest.approx(9.20 / 9.39 - 1)  # the lowest low of the bars held
+    assert timelow == pytest.approx(9.30 / 9.39 - 1)  # the low of the first bar 60 minutes on
+    assert engine.entry_name(("lim", 2, 0.05, 0.05, 575)) == "lim2_0.05_abs5_c575"

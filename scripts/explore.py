@@ -32,7 +32,17 @@ from qts_rebound.stage2.fills import orders_table, sessions  # noqa: E402
 
 OUT = REPO / "data" / "explore"
 PANEL = OUT / "panel"
-FEATS = ["relvol", "gap_sig", "depth_sig", "bars_before", "first_bar_rel", "trig_rel", "mfe", "mae"]
+FEATS = [
+    "relvol",
+    "gap_sig",
+    "depth_sig",
+    "bars_before",
+    "first_bar_rel",
+    "trig_rel",
+    "mfe",
+    "mae",
+    "last_minute",
+]
 
 
 def build_month(
@@ -113,6 +123,10 @@ def cmd_build(a) -> None:
 WINDOWS = (571, 575, 580, 600, 960)  # the order is cancelled if it has not filled by this minute
 PRE_MAX = (None, 0.05, 0.01, 0.001)  # pre-market dollar volume (04:00-09:24) as a share of ADV
 FAMILY_ENTRIES = (
+    "lim2_abs5_c575",
+    "lim2_abs8_c575",
+    "lim2_0.02_abs5_c575",
+    "lim2_0.05_abs5_c575",
     "lim2",
     "lim2_abs5",
     "lim2_abs8",
@@ -122,14 +136,34 @@ FAMILY_ENTRIES = (
     "rlim2_abs5",
     "vol2_0_abs5",
 )
-FAMILY_EXITS = ("moc", "t15", "t60", "tgt8")
-HEADLINE = {  # the rules the note discusses; all others are sensitivity
-    "open_sweep_5": ("lim2_abs5", 575, 0.01, "moc"),
-    "open_sweep_5_t15": ("lim2_abs5", 575, 0.01, "t15"),
-    "open_sweep_8": ("lim2_abs8", 575, 0.01, "moc"),
-    "open_sweep_5_strict": ("lim2_0.05_abs5", 575, 0.01, "moc"),
-    "open_sweep_5_reactive": ("vol2_0_abs5", 576, 0.01, "moc"),
+FAMILY_EXITS = ("moc", "t15", "t60", "tgt8", "lowlast10", "timelow60")
+HEADLINE = {  # name: (entry, cancel filter minute, pre-market cap, exit, auction shares priced at the limit)
+    "open_sweep_5": ("lim2_abs5_c575", 960, 0.01, "moc", False),
+    "open_sweep_5_conservative": ("lim2_abs5_c575", 960, 0.01, "timelow60", True),
+    "open_sweep_5_worst_exit": ("lim2_abs5_c575", 960, 0.01, "lowlast10", True),
+    "open_sweep_8": ("lim2_abs8_c575", 960, 0.01, "moc", False),
+    "open_sweep_5_strict2": ("lim2_0.02_abs5_c575", 960, 0.01, "moc", False),
+    "open_sweep_5_strict5": ("lim2_0.05_abs5_c575", 960, 0.01, "moc", False),
+    "open_sweep_5_reactive": ("vol2_0_abs5", 576, 0.01, "moc", False),
 }
+
+
+def rule_trades(t: pd.DataFrame, spec: tuple) -> pd.DataFrame:
+    """The fills of one headline rule with ``g`` (gross return) and ``net``. With the last field
+    set, every share is priced at the limit (no price improvement at the open)."""
+    en, xn = stats.names()
+    ename, w, pm, xname, at_limit = spec
+    x = t[(t["e"] == en.index(ename)) & (t["emin"] <= w) & (t["pre_dv"] < pm * t["adv_prev"])].copy()
+    g = x[f"r{xn.index(xname)}"].astype(float)
+    if at_limit:
+        k, floor = engine.ENTRIES[en.index(ename)][1], engine.ENTRIES[en.index(ename)][3]
+        limit = x["cprev_u"] * (1 - np.maximum(k * x["sigma"], floor))
+        g = (1 + g) * x["px"] / limit - 1
+    x["g"] = g
+    x["net"] = g - x["cost"].astype(float)
+    return x
+
+
 PERIODS = (("2003-2016", 2003, 2016), ("2017-2023", 2017, 2023), ("2020-2023", 2020, 2023))
 
 
@@ -207,16 +241,18 @@ def cmd_scan(a) -> None:
     r.to_parquet(OUT / "scan.parquet", index=False)
     n_var = len(r) // len(PERIODS)
     head = {}
-    for name, (ename, w, pm, xname) in HEADLINE.items():
-        x = t[(t["e"] == en.index(ename)) & (t["emin"] <= w) & (t["pre_rel"] < pm)]
-        col = f"r{xn.index(xname)}"
-        net = x[col] - x["cost"]
+    for name, spec in HEADLINE.items():
+        ename, w, pm, xname, at_limit = spec
+        x = rule_trades(t, spec)
+        col = "g"
+        net = x["net"]
         head[name] = {
             "trial": name,
             "entry": ename,
             "window": w,
             "pre_max": pm,
             "exit": xname,
+            "auction_at_limit": at_limit,
             "periods": _periods(x, col, days),
             "by_year_net": {
                 str(k): round(float(v), 5) for k, v in net.groupby(x["date"].dt.year).mean().items()
@@ -245,17 +281,15 @@ def cmd_tick_sample(a) -> None:
     """A random sample of open_sweep_5 fills (half before 2017, half after) for scripts/massive.py ticks."""
     t = stats.load(PANEL)
     en, _ = stats.names()
-    ename, w, pm, _x = HEADLINE["open_sweep_5"]
-    x = t[
-        (~t["news"]) & (t["e"] == en.index(ename)) & (t["emin"] <= w) & (t["pre_dv"] < pm * t["adv_prev"])
-    ].copy()
-    x["net"] = x["r0"] - x["cost"]
+    x = rule_trades(t[~t["news"]], HEADLINE["open_sweep_5"])
+    spec = engine.ENTRIES[en.index(HEADLINE["open_sweep_5"][0])]
+    x["limit_px"] = x["cprev_u"] * (1 - np.maximum(spec[1] * x["sigma"], spec[3]))
     parts = [
         g.sample(n=min(TICK_N, len(g)), random_state=TICK_SEED)
         for _, g in x.groupby(x["date"].dt.year >= 2017)
     ]
     s = pd.concat(parts).sort_values(["date", "sym"])
-    s = s.rename(columns={"emin": "entry_minute", "px": "limit"})
+    s = s.rename(columns={"emin": "entry_minute", "px": "fill_px", "limit_px": "limit"})
     s["date"] = s["date"].dt.strftime("%Y-%m-%d")
     cols = ["date", "sym", "ticker", "entry_minute", "limit", "shares", "q_auction", "cprev_u", "cu", "net"]
     s[cols].to_csv(OUT / "tick_sample.csv", index=False)
@@ -311,13 +345,10 @@ def cmd_export(a) -> None:
     order sheet (every order the rule would rest, with a fill-probability score)."""
     import lightgbm as lgb
 
-    en, xn = stats.names()
-    ename, w, pm, xname = HEADLINE["open_sweep_5"]
-    t = stats.load(PANEL)
-    t = t[(t["e"] == en.index(ename)) & (t["emin"] <= w) & (t["pre_dv"] < pm * t["adv_prev"])].copy()
-    t["gross"] = t[f"r{xn.index(xname)}"].astype(float)
+    ename, w, pm, xname, _ = HEADLINE["open_sweep_5"]
+    t = rule_trades(stats.load(PANEL), HEADLINE["open_sweep_5"])
+    t["gross"] = t["g"]
     t["cost"] = t["cost"].astype(float)
-    t["net"] = t["gross"] - t["cost"]
     t["drop"] = t["px"] / t["cprev_u"] - 1
     t = t.rename(columns={"emin": "entry_minute", "px": "fill_px", "cprev_u": "prev_close", "cu": "close_px"})
     cols = [
@@ -397,7 +428,7 @@ def cmd_export(a) -> None:
     meta = {
         "rule": "open_sweep_5",
         "entry": ename,
-        "cancel_minute": w,
+        "cancel_minute": int(engine.ENTRIES[stats.names()[0].index(ename)][4]),
         "pre_market_cap": pm,
         "exit": xname,
         "position_usd": engine.POSITION,
