@@ -30,9 +30,11 @@ import pandas as pd
 REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO))
 
+from qts_rebound.massive.flatfiles import key_date, load_listing  # noqa: E402
 from qts_rebound.paths import LEDGER, OUT, PANEL_DB, SHARED_STORE  # noqa: E402
 from qts_rebound.stage2.data import (  # noqa: E402
     CLOSE,
+    MASSIVE_ROOT,
     OPEN,
     PRE_LAST,
     PRE_OPEN,
@@ -149,17 +151,44 @@ def gate_sets(cands: pd.DataFrame) -> dict[str, pd.DataFrame]:
 # ------------------------------------------------------------------ extract
 
 
+def month_status(dataset: str = "minute_aggs") -> dict[str, bool]:
+    """For every research month in the downloader's listing: True when each of its files is on
+    disk at the listed size, so a month still downloading is never cut short (and then skipped
+    as done)."""
+    listing = MASSIVE_ROOT / "manifest" / f"listing_{dataset}.csv"
+    if not listing.exists():
+        raise SystemExit(f"no listing at {listing}: run the downloader (plan or get) first")
+    last = last_research_day()
+    by: dict[str, bool] = {}
+    for o in load_listing(listing):
+        d = key_date(o.key)
+        if d is None or d > last:
+            continue
+        p = MASSIVE_ROOT / "raw" / o.key
+        m = f"{d:%Y-%m}"
+        by[m] = by.get(m, True) and p.exists() and p.stat().st_size == o.size
+    return by
+
+
+def complete_months(dataset: str = "minute_aggs") -> set[str]:
+    return {m for m, ok in month_status(dataset).items() if ok}
+
+
 def cmd_extract(a) -> None:
     mp = pd.read_parquet(MAPPING)
+    ready = complete_months()
     cands = micro_candidates(no_news_only=False)[["date", "ticker"]]
     wanted = cands.merge(mp[["date", "ticker", "sym"]], on=["date", "ticker"])[["date", "sym"]]
     wanted["month"] = wanted["date"].dt.strftime("%Y-%m")
     t0 = time.monotonic()
-    done = skipped = 0
+    done = skipped = waiting = 0
     for month, fl in months(research_files("minute_aggs")).items():
         out = MINUTES / f"{month}.parquet"
         if out.exists():
             skipped += 1
+            continue
+        if month not in ready:
+            waiting += 1
             continue
         if a.budget and time.monotonic() - t0 > a.budget:
             print(f"budget reached; {done} months written this run; run again to continue")
@@ -167,7 +196,7 @@ def cmd_extract(a) -> None:
         n = extract_files(fl, wanted[wanted["month"] == month], out)
         done += 1
         print(f"  {month}: {len(fl)} files -> {n:,} bars ({time.monotonic() - t0:.0f}s)", flush=True)
-    print(f"extract: {done} months written, {skipped} already there")
+    print(f"extract: {done} months written, {skipped} already there, {waiting} still downloading")
 
 
 # ------------------------------------------------------------------ gates
@@ -185,7 +214,12 @@ def cmd_gates(a) -> None:
         res[name] = {"matched_overall": overall, "matched_worst_year": worst, "pass": g}
         ok &= g
     month_files = {p.stem for p in MINUTES.glob("*.parquet")}
-    need = set(months(research_files("minute_aggs")))
+    status = month_status()
+    if not all(status.values()):
+        raise SystemExit(
+            f"the download is not finished: {sum(not v for v in status.values())} months incomplete"
+        )
+    need = set(status)
     if need - month_files:
         raise SystemExit(f"extract is not finished: {len(need - month_files)} months missing")
     mp = pd.read_parquet(MAPPING)

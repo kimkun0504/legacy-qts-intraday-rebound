@@ -271,3 +271,32 @@ def test_simulate_without_bars_fills_nothing():
     empty = _bars([])
     f = simulate(orders, empty, sessions(empty))
     assert not f["filled"].any() and f.loc[0, "cutoff"] == 945
+
+
+def test_extract_waits_for_complete_months(tmp_path):
+    import importlib.util
+
+    root = Path(__file__).resolve().parents[1]
+    spec = importlib.util.spec_from_file_location("run_stage2_m", root / "scripts" / "run_stage2.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    mod.MASSIVE_ROOT = tmp_path
+    k = "us_stocks_sip/minute_aggs_v1/{y}/{m}/{d}.csv.gz"
+    keys = [
+        ("2010", "01", "2010-01-04", 5),
+        ("2010", "01", "2010-01-05", 5),
+        ("2010", "02", "2010-02-01", 5),
+        ("2010", "02", "2010-02-02", 5),
+        ("2023", "11", "2023-11-09", 5),
+    ]
+    lines = ["key,size,etag,last_modified"]
+    for y, m, d, size in keys:
+        lines.append(f"{k.format(y=y, m=m, d=d)},{size},e,x")
+    (tmp_path / "manifest").mkdir()
+    (tmp_path / "manifest" / "listing_minute_aggs.csv").write_text("\n".join(lines) + "\n")
+    for y, m, d, size in keys[:3]:  # January complete; February has one file of two
+        p = tmp_path / "raw" / k.format(y=y, m=m, d=d)
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_bytes(b"x" * size)
+    assert mod.month_status() == {"2010-01": True, "2010-02": False}  # the holdout day is not counted
+    assert mod.complete_months() == {"2010-01"}
