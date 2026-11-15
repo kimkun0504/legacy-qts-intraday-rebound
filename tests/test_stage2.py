@@ -264,3 +264,10 @@ def test_costs_small_order_sane():
     c = costs(t)
     assert (c > 0).all() and (c < 0.02).all()
     assert c.iloc[1] - c.iloc[0] == pytest.approx(100 * 0.0015 / 500)  # the auction fee on the auction part
+
+
+def test_simulate_without_bars_fills_nothing():
+    orders = _orders([(D, "A", "A", 10.0, 50, 10.4, 1e6, 0.03)])
+    empty = _bars([])
+    f = simulate(orders, empty, sessions(empty))
+    assert not f["filled"].any() and f.loc[0, "cutoff"] == 945

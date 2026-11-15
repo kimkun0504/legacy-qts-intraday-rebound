@@ -252,7 +252,12 @@ def cmd_fills(a) -> None:
         if a.budget and time.monotonic() - t0 > a.budget:
             print("budget reached; run again to continue")
             return
-        bars = pd.read_parquet(MINUTES / f"{month}.parquet")
+        mfile = MINUTES / f"{month}.parquet"
+        if mfile.exists():
+            bars = pd.read_parquet(mfile)
+        else:  # no Massive minute file this month: no bars, so no fills (gate 2 counts this)
+            print(f"  {month}: no minute bars; its orders stay unfilled", flush=True)
+            bars = pd.DataFrame(columns=["date", "sym", "minute", "o", "h", "l", "c", "v", "n"])
         sess = sessions(bars[bars["sym"] == "IWM"])
         o = orders_all[orders_all["month"] == month]
         pre = premarket_dollar_volume(bars[bars["sym"].isin(o["sym"].unique())], PRE_OPEN, PRE_LAST)
@@ -267,8 +272,13 @@ def cmd_fills(a) -> None:
     print("fills: done")
 
 
+def order_months() -> set[str]:
+    o = orders_table(micro_candidates(no_news_only=True), pd.read_parquet(MAPPING))
+    return set(o["date"].dt.strftime("%Y-%m"))
+
+
 def load_trades(variant: str = "base") -> pd.DataFrame:
-    need = set(pd.date_range(WINDOW_START, last_research_day(), freq="MS").strftime("%Y-%m"))
+    need = order_months()
     have = {p.stem for p in (FILLS / variant).glob("*.parquet")}
     if not need <= have:
         raise SystemExit(f"fills for {variant} not finished: {len(need - have)} months missing")
